@@ -20,6 +20,7 @@ import {
 import { z } from 'zod'
 
 import { MnemoApiClient, type ApiClientConfig, MnemoApiError } from './api-client.js'
+import { PROCEDURE_TOOLS, dispatchProcedureTool, formatProcedureApiError, isProcedureTool } from './procedure-tools.js'
 import {
   PERSONAL_TOOLS,
   PERSONAL_TOOL_INFO,
@@ -398,7 +399,7 @@ const MEMORY_TOOLS: Tool[] = [
  */
 const API_KEY_ONLY_MEMORY_TOOLS = new Set(['memory_restore', 'job_status'])
 
-/** Tools visible to a session: every memory tool plus the personal tools its principal may call. */
+/** Tools visible to a session: every memory tool, the personal tools its principal may call, and the procedure tools. */
 export function toolsForPrincipal(principal: ServerPrincipal): Tool[] {
   const memory =
     principal === 'oauth'
@@ -408,7 +409,7 @@ export function toolsForPrincipal(principal: ServerPrincipal): Tool[] {
     principal === 'oauth'
       ? PERSONAL_TOOLS.filter((t) => isPersonalTool(t.name) && PERSONAL_TOOL_INFO[t.name].oauth)
       : PERSONAL_TOOLS
-  return [...memory, ...personal]
+  return [...memory, ...personal, ...PROCEDURE_TOOLS]
 }
 
 export function createServer(cfg: ApiClientConfig, options: ServerOptions = {}): Server {
@@ -456,7 +457,9 @@ export function createServer(cfg: ApiClientConfig, options: ServerOptions = {}):
         err instanceof MnemoApiError
           ? isPersonalTool(name)
             ? formatPersonalApiError(err, name)
-            : formatApiError(err, requestedContainer(args))
+            : isProcedureTool(name)
+              ? formatProcedureApiError(err, name)
+              : formatApiError(err, requestedContainer(args))
           : err instanceof z.ZodError
             ? `Invalid arguments: ${err.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ')}`
             : err instanceof Error
@@ -585,6 +588,7 @@ async function dispatch(
     }
     default:
       if (isPersonalTool(name)) return dispatchPersonalTool(api, name, raw)
+      if (isProcedureTool(name)) return dispatchProcedureTool(api, name, raw)
       throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`)
   }
 }

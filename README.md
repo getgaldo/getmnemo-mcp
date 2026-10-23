@@ -42,6 +42,20 @@ All personal-memory tools except `memory_timeline` are **API-key only**:
 the API rejects hosted OAuth MCP tokens on cross-container routes, so hosted
 OAuth sessions (`https://mcp.mnemohq.com/mcp`) do not list them.
 
+### Procedure tools
+
+How the team does things, learned from their captured browser work. Read
+only, published procedures only, and the same for every caller.
+
+| Tool | What it does | Scope |
+|---|---|---|
+| `procedure_list` | The workspace's published procedures, most recently seen first, optionally for one app. | `memories:read` |
+| `procedure_get` | One procedure's current steps and conditions, plus its version history. | `memories:read` |
+| `procedure_ask` | "How do we do X here?", answered from published procedures with citations. `abstained: true` means none covers it. | `search:read` |
+
+Hosted OAuth sessions get all three. A connection limited to some containers
+reaches them only when its grant includes `procedures:workspace`.
+
 Remote HTTP calls are scoped by the user's Mnemo OAuth grant. The user signs
 in, chooses a workspace and memory container, and the server derives that
 scope from the access token. The model cannot set or change it.
