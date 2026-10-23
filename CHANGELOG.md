@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **`procedure_list`, `procedure_get` and `procedure_ask`**: the workspace's
+  published procedures (`/v1/procedures`), for API-key and hosted OAuth
+  sessions. Read only. A container-limited grant needs
+  `procedures:workspace`.
+
 ## 0.4.0 — 2026-09-09
 
 API-parity release: closes the gaps between the public Memory API and the MCP

@@ -174,6 +174,17 @@ export type ContainerScope =
   | { containerTag: string; scope?: never }
   | { containerTag?: never; scope: { type: string; id: string } }
 
+export type ProcedurePage = {
+  items: Array<Record<string, unknown>>
+  nextCursor: string | null
+}
+
+export type ProcedureAskResponse = {
+  answer: string
+  abstained: boolean
+  citations: Array<{ title: string | null; url: string | null; app: string | null; content: string; score: number }>
+}
+
 export type ApiClientConfig = {
   baseUrl: string
   apiKey: string
@@ -609,6 +620,25 @@ export class MnemoApiClient {
       { ...compact(rest), ...this.containerBody(container) },
       container,
     )
+  }
+
+  /** GET /v1/procedures — published procedures, most recently seen first. Needs memories:read. */
+  async listProcedures(input: { app?: string; limit?: number; cursor?: string } = {}): Promise<ProcedurePage> {
+    const params = new URLSearchParams()
+    setParam(params, 'app', input.app)
+    setParam(params, 'limit', input.limit)
+    setParam(params, 'cursor', input.cursor)
+    return this.request<ProcedurePage>('GET', `/v1/procedures${queryString(params)}`)
+  }
+
+  /** GET /v1/procedures/:id — one published procedure with its versions. Needs memories:read. */
+  async getProcedure(id: string): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>('GET', `/v1/procedures/${encodeURIComponent(id)}`)
+  }
+
+  /** POST /v1/procedures/ask — answered from published procedures only. Needs search:read. */
+  async askProcedures(q: string): Promise<ProcedureAskResponse> {
+    return this.request<ProcedureAskResponse>('POST', '/v1/procedures/ask', { q })
   }
 
   private async request<T>(
