@@ -458,7 +458,7 @@ export function createServer(cfg: ApiClientConfig, options: ServerOptions = {}):
           ? isPersonalTool(name)
             ? formatPersonalApiError(err, name)
             : isProcedureTool(name)
-              ? formatProcedureApiError(err)
+              ? formatProcedureApiError(err, name)
               : formatApiError(err, requestedContainer(args))
           : err instanceof z.ZodError
             ? `Invalid arguments: ${err.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ')}`

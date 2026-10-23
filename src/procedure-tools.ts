@@ -93,8 +93,12 @@ export async function dispatchProcedureTool(
   }
 }
 
-/** The API's own message for a refusal: it names the procedures container, which the generic container text would not. */
-export function formatProcedureApiError(err: MnemoApiError): string {
-  if (err.status === 404) return 'No published procedure with that id.'
+/**
+ * The API's own message for a refusal: it names the procedures container,
+ * which the generic container text would not. Only procedure_get's 404 means
+ * "no such procedure"; on the others it is an API without the routes.
+ */
+export function formatProcedureApiError(err: MnemoApiError, name: ProcedureToolName): string {
+  if (err.status === 404 && name === 'procedure_get') return 'No published procedure with that id.'
   return `Mnemo API error (${err.status}): ${err.message}`
 }

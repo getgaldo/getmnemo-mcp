@@ -139,6 +139,13 @@ describe('procedure tools', () => {
     expect(fetchImpl).not.toHaveBeenCalled()
   })
 
+  it('passes a 404 on procedure_list through instead of claiming no such procedure', async () => {
+    h = await harness(vi.fn<typeof fetch>().mockResolvedValue(apiError(404, undefined, 'Cannot GET /v1/procedures')))
+    const { text, isError } = await h.call('procedure_list', {})
+    expect(isError).toBe(true)
+    expect(text).toBe('Mnemo API error (404): Cannot GET /v1/procedures')
+  })
+
   it("passes the API's own refusal through, which names the procedures container", async () => {
     const message = 'This connection does not cover the procedures container (procedures:workspace).'
     h = await harness(vi.fn<typeof fetch>().mockResolvedValue(apiError(403, 'PROCEDURES_OUTSIDE_GRANT', message)), { principal: 'oauth' })
