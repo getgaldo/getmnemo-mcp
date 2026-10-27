@@ -1,6 +1,6 @@
 import { request } from 'node:http'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createMcpHttpServer, pinnedContainerFromGrant } from './http.js'
+import { createMcpHttpServer, oauthIdentifiersFor, pinnedContainerFromGrant } from './http.js'
 
 function call(port: number, options: { method: string; headers?: Record<string, string>; body?: string }): Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: string }> {
   return new Promise((resolve, reject) => {
@@ -364,5 +364,89 @@ describe('memory_search polarity over the real transport', () => {
 
     expect(searchBodies).toHaveLength(0)
     expect(result.errorMessages.join(' ')).toMatch(/polarity/i)
+  })
+})
+
+describe('OAuth identifiers (host move)', () => {
+  const cutover = {
+    MCP_RESOURCE_URL: 'https://mcp.getgaldo.com/mcp',
+    MCP_AUTHORIZATION_SERVER: 'https://api.getgaldo.com/v1/mcp/oauth',
+    MCP_LEGACY_RESOURCE_URLS: 'https://mcp.mnemohq.com/mcp',
+  }
+
+  it('defaults to the mnemohq identifiers when the env is unset', () => {
+    expect(oauthIdentifiersFor('mcp.mnemohq.com', {})).toEqual({
+      resource: 'https://mcp.mnemohq.com/mcp',
+      authorizationServer: 'https://api.mnemohq.com/v1/mcp/oauth',
+      resourceMetadataUrl: 'https://mcp.mnemohq.com/.well-known/oauth-protected-resource',
+    })
+  })
+
+  it('advertises the primary resource on the primary host', () => {
+    expect(oauthIdentifiersFor('mcp.getgaldo.com', cutover)).toEqual({
+      resource: 'https://mcp.getgaldo.com/mcp',
+      authorizationServer: 'https://api.getgaldo.com/v1/mcp/oauth',
+      resourceMetadataUrl: 'https://mcp.getgaldo.com/.well-known/oauth-protected-resource',
+    })
+  })
+
+  it('advertises a legacy resource only on its own host (case-insensitive)', () => {
+    expect(oauthIdentifiersFor('MCP.mnemohq.com', cutover)).toEqual({
+      resource: 'https://mcp.mnemohq.com/mcp',
+      authorizationServer: 'https://api.getgaldo.com/v1/mcp/oauth',
+      resourceMetadataUrl: 'https://mcp.mnemohq.com/.well-known/oauth-protected-resource',
+    })
+  })
+
+  it.each([undefined, 'evil.example', 'mcp.mnemohq.com.evil.example', 'mcp.mnemohq.com:8443'])(
+    'falls back to the primary for host %j',
+    (host) => {
+      expect(oauthIdentifiersFor(host, cutover).resource).toBe('https://mcp.getgaldo.com/mcp')
+    },
+  )
+
+  it('ignores an unparseable legacy entry', () => {
+    expect(oauthIdentifiersFor('mcp.mnemohq.com', { ...cutover, MCP_LEGACY_RESOURCE_URLS: 'not a url' }).resource)
+      .toBe('https://mcp.getgaldo.com/mcp')
+  })
+
+  it('refuses to start with an unparseable MCP_RESOURCE_URL', () => {
+    expect(() => createMcpHttpServer({ MCP_RESOURCE_URL: 'not a url' })).toThrow()
+  })
+
+  async function get(env: Record<string, string>, path: string, host: string) {
+    const server = createMcpHttpServer({ GETMNEMO_CONTAINER_TAG: 'user:test', ...env })
+    await new Promise<void>((resolve) => server.listen(0, resolve))
+    const address = server.address()
+    if (!address || typeof address === 'string') throw new Error('server did not bind')
+    const result = await new Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: string }>((resolve, reject) => {
+      const req = request({ hostname: '127.0.0.1', port: address.port, path, method: path === '/mcp' ? 'POST' : 'GET', headers: { host } }, (res) => {
+        let body = ''
+        res.setEncoding('utf8')
+        res.on('data', (chunk: string) => { body += chunk })
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, headers: res.headers, body }))
+      })
+      req.on('error', reject)
+      req.end()
+    })
+    await new Promise<void>((resolve, reject) => server.close((err) => err ? reject(err) : resolve()))
+    return result
+  }
+
+  it('serves protected-resource metadata per host', async () => {
+    const primary = await get(cutover, '/.well-known/oauth-protected-resource', 'mcp.getgaldo.com')
+    expect(JSON.parse(primary.body)).toEqual(expect.objectContaining({
+      resource: 'https://mcp.getgaldo.com/mcp',
+      authorization_servers: ['https://api.getgaldo.com/v1/mcp/oauth'],
+    }))
+    expect(primary.headers.vary).toBe('Host')
+    const legacy = await get(cutover, '/.well-known/oauth-protected-resource', 'mcp.mnemohq.com')
+    expect(JSON.parse(legacy.body).resource).toBe('https://mcp.mnemohq.com/mcp')
+  })
+
+  it('points the 401 challenge at the metadata for the host that was called', async () => {
+    const result = await get(cutover, '/mcp', 'mcp.getgaldo.com')
+    expect(result.status).toBe(401)
+    expect(result.headers['www-authenticate']).toContain('resource_metadata="https://mcp.getgaldo.com/.well-known/oauth-protected-resource"')
   })
 })

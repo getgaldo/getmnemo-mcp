@@ -14,6 +14,55 @@ import type { ContainerScope } from './api-client.js'
 
 type EnvLike = Record<string, string | undefined>
 const DEFAULT_API_URL = process.env.GETMNEMO_API_URL ?? 'https://api.mnemohq.com'
+const DEFAULT_RESOURCE_URL = 'https://mcp.mnemohq.com/mcp'
+const DEFAULT_AUTHORIZATION_SERVER = 'https://api.mnemohq.com/v1/mcp/oauth'
+
+export interface OAuthIdentifiers {
+  /** RFC 9728 `resource`: the MCP URL the client connected to. */
+  resource: string
+  /** The authorization server issuer advertised in `authorization_servers`. */
+  authorizationServer: string
+  /** Where this resource's metadata lives; sent as `resource_metadata` on a 401. */
+  resourceMetadataUrl: string
+}
+
+function hostOf(url: string): string | undefined {
+  try {
+    return new URL(url).host.toLowerCase()
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * The OAuth identifiers to advertise for a request.
+ *
+ *   MCP_RESOURCE_URL          primary resource (default https://mcp.mnemohq.com/mcp)
+ *   MCP_AUTHORIZATION_SERVER  issuer (default https://api.mnemohq.com/v1/mcp/oauth)
+ *   MCP_LEGACY_RESOURCE_URLS  optional comma-separated resources still served
+ *                             after a host move. A request whose Host equals
+ *                             one of these URLs' host is told THAT resource, so
+ *                             a client connected to the old host still sees a
+ *                             matching `resource`. The Host header only picks
+ *                             among configured values; anything else gets the
+ *                             primary.
+ */
+export function oauthIdentifiersFor(host: string | undefined, env: EnvLike = process.env): OAuthIdentifiers {
+  const primary = env.MCP_RESOURCE_URL?.trim() || DEFAULT_RESOURCE_URL
+  const authorizationServer = env.MCP_AUTHORIZATION_SERVER?.trim() || DEFAULT_AUTHORIZATION_SERVER
+  const requestHost = host?.trim().toLowerCase()
+  const legacy = (env.MCP_LEGACY_RESOURCE_URLS ?? '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0)
+  const matched = requestHost ? legacy.find((url) => hostOf(url) === requestHost) : undefined
+  const resource = matched ?? primary
+  return {
+    resource,
+    authorizationServer,
+    resourceMetadataUrl: `${new URL(resource).origin}/.well-known/oauth-protected-resource`,
+  }
+}
 
 function bearerToken(req: IncomingMessage): string | undefined {
   const authorization = req.headers.authorization
@@ -76,6 +125,8 @@ export function pinnedContainerFromGrant(
 
 export function createMcpHttpServer(env: EnvLike = process.env) {
   const apiUrl = env.GETMNEMO_API_URL ?? DEFAULT_API_URL
+  // Fail at startup, not per request, if MCP_RESOURCE_URL is not a URL.
+  oauthIdentifiersFor(undefined, env)
 
   const httpServer = createHttpServer(async (req, res) => {
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`)
@@ -85,11 +136,13 @@ export function createMcpHttpServer(env: EnvLike = process.env) {
       res.end(JSON.stringify({ status: 'ok', service: 'getmnemo-mcp', transport: 'streamable-http' }))
       return
     }
+    const oauth = oauthIdentifiersFor(req.headers.host, env)
     if (url.pathname === '/.well-known/oauth-protected-resource') {
-      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'public, max-age=300' })
+      // Varies by Host (legacy hosts get their own resource), so caches must key on it.
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'public, max-age=300', vary: 'Host' })
       res.end(JSON.stringify({
-        resource: 'https://mcp.mnemohq.com/mcp',
-        authorization_servers: ['https://api.mnemohq.com/v1/mcp/oauth'],
+        resource: oauth.resource,
+        authorization_servers: [oauth.authorizationServer],
         scopes_supported: ['memories:read', 'memories:write', 'memories:delete', 'search:read'],
         bearer_methods_supported: ['header'],
       }))
@@ -107,7 +160,7 @@ export function createMcpHttpServer(env: EnvLike = process.env) {
 
     const credential = bearerToken(req)
     if (!credential) {
-      res.setHeader('WWW-Authenticate', 'Bearer realm="mcp", scope="memories:read memories:write memories:delete search:read", resource_metadata="https://mcp.mnemohq.com/.well-known/oauth-protected-resource"')
+      res.setHeader('WWW-Authenticate', `Bearer realm="mcp", scope="memories:read memories:write memories:delete search:read", resource_metadata="${oauth.resourceMetadataUrl}"`)
       reject(res, 401, 'OAuth authorization is required. Connect this MCP server from a client that supports remote OAuth.')
       return
     }
@@ -123,7 +176,7 @@ export function createMcpHttpServer(env: EnvLike = process.env) {
         signal: AbortSignal.timeout(5_000),
       })
       if (!introspection.ok) {
-        res.setHeader('WWW-Authenticate', 'Bearer realm="mcp", error="invalid_token", resource_metadata="https://mcp.mnemohq.com/.well-known/oauth-protected-resource"')
+        res.setHeader('WWW-Authenticate', `Bearer realm="mcp", error="invalid_token", resource_metadata="${oauth.resourceMetadataUrl}"`)
         reject(res, 401, 'The MCP authorization token is invalid or expired.')
         return
       }
