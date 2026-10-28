@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Fixed
+- **HTTP transport: a failed token check no longer crashes the server.** When
+  the API could not be reached, timed out or answered with something other
+  than JSON, the rejection went unhandled and took the process (and every
+  other client's request) down. It now answers `503` with `Retry-After: 5`.
+  An API `429` or `5xx` on introspection is also `503` instead of
+  `401 invalid_token`, so clients keep their token rather than signing in
+  again. Any other failure in a request answers `500` and the server keeps
+  running.
+
 ### Added
 - **`procedure_list`, `procedure_get` and `procedure_ask`**: the workspace's
   published procedures (`/v1/procedures`), for API-key and hosted OAuth
