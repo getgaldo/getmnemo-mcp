@@ -81,6 +81,24 @@ function reject(res: ServerResponse, status: number, message: string): void {
   res.end(JSON.stringify({ error: message }))
 }
 
+/** Seconds a client should wait before retrying after a 503. */
+const RETRY_AFTER_SECONDS = '5'
+
+/**
+ * The API could not answer the token check (down, restarting, overloaded or
+ * rate limiting). Temporary: 503 with Retry-After, and no invalid_token
+ * challenge, so clients keep their token instead of signing in again.
+ */
+function unavailable(res: ServerResponse): void {
+  res.setHeader('retry-after', RETRY_AFTER_SECONDS)
+  reject(res, 503, 'Memory service is temporarily unavailable. Try again shortly.')
+}
+
+/** API answers that mean "not now" rather than "this token is bad". */
+function isTemporaryFailure(status: number): boolean {
+  return status === 429 || status >= 500
+}
+
 function resolveRequestContainer(req: IncomingMessage, env: EnvLike): ContainerScope | null {
   if (env.GETMNEMO_ALLOW_HEADER_SCOPE !== '1') return resolveContainerFromEnv(env)
   return resolveContainerFromHeaders(
@@ -128,7 +146,7 @@ export function createMcpHttpServer(env: EnvLike = process.env) {
   // Fail at startup, not per request, if MCP_RESOURCE_URL is not a URL.
   oauthIdentifiersFor(undefined, env)
 
-  const httpServer = createHttpServer(async (req, res) => {
+  const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`)
 
     if (url.pathname === '/healthz') {
@@ -171,16 +189,32 @@ export function createMcpHttpServer(env: EnvLike = process.env) {
     let container: ContainerScope | undefined
     const isOAuthToken = credential.split('.').length === 3
     if (isOAuthToken) {
-      const introspection = await fetch(`${apiUrl}/v1/mcp/oauth/introspect`, {
-        headers: { authorization: `Bearer ${credential}` },
-        signal: AbortSignal.timeout(5_000),
-      })
+      let introspection: Response
+      try {
+        introspection = await fetch(`${apiUrl}/v1/mcp/oauth/introspect`, {
+          headers: { authorization: `Bearer ${credential}` },
+          signal: AbortSignal.timeout(5_000),
+        })
+      } catch {
+        unavailable(res)
+        return
+      }
+      if (isTemporaryFailure(introspection.status)) {
+        unavailable(res)
+        return
+      }
       if (!introspection.ok) {
         res.setHeader('WWW-Authenticate', `Bearer realm="mcp", error="invalid_token", resource_metadata="${oauth.resourceMetadataUrl}"`)
         reject(res, 401, 'The MCP authorization token is invalid or expired.')
         return
       }
-      const identity: unknown = await introspection.json()
+      let identity: unknown
+      try {
+        identity = await introspection.json()
+      } catch {
+        unavailable(res)
+        return
+      }
       if (!identity || typeof identity !== 'object') {
         reject(res, 401, 'Invalid MCP authorization response.')
         return
@@ -218,6 +252,16 @@ export function createMcpHttpServer(env: EnvLike = process.env) {
     await server.connect(transport)
     await transport.handleRequest(req, res)
     await server.close()
+  }
+
+  // A request that fails must never take the process (and every other
+  // agent's request) down with it: answer what can still be answered.
+  const httpServer = createHttpServer((req, res) => {
+    handle(req, res).catch((error: unknown) => {
+      process.stderr.write(`MCP request failed: ${error instanceof Error ? error.message : String(error)}\n`)
+      if (!res.headersSent) reject(res, 500, 'Internal error.')
+      else res.destroy()
+    })
   })
 
   return httpServer

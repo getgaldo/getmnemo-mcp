@@ -450,3 +450,74 @@ describe('OAuth identifiers (host move)', () => {
     expect(result.headers['www-authenticate']).toContain('resource_metadata="https://mcp.getgaldo.com/.well-known/oauth-protected-resource"')
   })
 })
+
+// The API restarting, overloaded or rate limiting must not take the MCP
+// server down or make agents throw their tokens away: a failed or refused
+// introspection is "try again shortly" (503), never a crash and never
+// "invalid token" unless the API actually said so.
+describe('introspection failures', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  function healthz(port: number): Promise<number> {
+    return new Promise((resolve, reject) => {
+      const req = request({ hostname: '127.0.0.1', port, path: '/healthz', method: 'GET' }, (res) => {
+        res.resume()
+        res.on('end', () => resolve(res.statusCode ?? 0))
+      })
+      req.on('error', reject)
+      req.end()
+    })
+  }
+
+  async function withServer<T>(run: (port: number) => Promise<T>): Promise<T> {
+    const server = createMcpHttpServer({ GETMNEMO_API_URL: 'https://api.example.com' })
+    await new Promise<void>((resolve) => server.listen(0, resolve))
+    const address = server.address()
+    if (!address || typeof address === 'string') throw new Error('server did not bind')
+    try {
+      return await run(address.port)
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((err) => err ? reject(err) : resolve()))
+    }
+  }
+
+  function toolCall(port: number) {
+    return call(port, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer header.payload.signature',
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+    })
+  }
+
+  it.each([
+    ['the API cannot be reached', () => Promise.reject(new TypeError('fetch failed'))],
+    ['the introspection times out', () => Promise.reject(new DOMException('The operation was aborted due to timeout', 'TimeoutError'))],
+    ['the API is down (502)', async () => new Response('bad gateway', { status: 502 })],
+    ['the API rate limits it (429)', async () => new Response('{"message":"Too many requests"}', { status: 429 })],
+    ['the API answers something that is not JSON', async () => new Response('<html>', { status: 200 })],
+  ])('answers 503 with Retry-After when %s, and keeps serving', async (_label, introspect) => {
+    vi.stubGlobal('fetch', vi.fn(introspect))
+
+    const [result, health] = await withServer(async (port) => [await toolCall(port), await healthz(port)] as const)
+
+    expect(result.status).toBe(503)
+    expect(result.headers['retry-after']).toBe('5')
+    expect(result.headers['www-authenticate']).toBeUndefined()
+    expect(health).toBe(200)
+  })
+
+  it('still answers 401 invalid_token when the API refuses the token', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"message":"Unauthorized"}', { status: 401 })))
+
+    const result = await withServer((port) => toolCall(port))
+
+    expect(result.status).toBe(401)
+    expect(String(result.headers['www-authenticate'])).toContain('error="invalid_token"')
+  })
+})
