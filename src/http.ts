@@ -9,7 +9,7 @@
 import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { createServer } from './server.js'
-import { resolveContainerFromEnv, resolveContainerFromHeaders } from './config.js'
+import { modelTimeoutFromEnv, resolveContainerFromEnv, resolveContainerFromHeaders } from './config.js'
 import type { ContainerScope } from './api-client.js'
 
 type EnvLike = Record<string, string | undefined>
@@ -143,6 +143,7 @@ export function pinnedContainerFromGrant(
 
 export function createMcpHttpServer(env: EnvLike = process.env) {
   const apiUrl = env.GETMNEMO_API_URL ?? DEFAULT_API_URL
+  const modelTimeoutMs = modelTimeoutFromEnv(env)
   // Fail at startup, not per request, if MCP_RESOURCE_URL is not a URL.
   oauthIdentifiersFor(undefined, env)
 
@@ -246,7 +247,7 @@ export function createMcpHttpServer(env: EnvLike = process.env) {
     // OAuth sessions do not see the API-key-only personal-memory tools: the
     // API denies MCP tokens on every cross-container route.
     const server = createServer(
-      { baseUrl: apiUrl, apiKey: credential, workspaceId, container },
+      { baseUrl: apiUrl, apiKey: credential, workspaceId, container, modelTimeoutMs },
       { principal: isOAuthToken ? 'oauth' : 'api_key' },
     )
     await server.connect(transport)

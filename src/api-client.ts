@@ -202,6 +202,12 @@ export type ApiClientConfig = {
   fetch?: typeof fetch
   /** Per-request timeout in ms (default 30s). */
   timeoutMs?: number
+  /**
+   * How long a call that waits on the answer model (procedure ask, /v1/answer)
+   * may take, when longer than its usual budget: a self-hosted install on a
+   * local CPU model answers in minutes (modelTimeoutFromEnv).
+   */
+  modelTimeoutMs?: number
 }
 
 export class MnemoApiError extends Error {
@@ -236,6 +242,7 @@ export class MnemoApiClient {
   private readonly headers: Record<string, string>
   private readonly fetchImpl: typeof fetch
   private readonly timeoutMs: number
+  private readonly modelTimeoutMs: number
   /**
    * Default tenant boundary, threaded into every request that lacks a
    * per-call override. Undefined only in hosted OAuth mode (all/multi grants),
@@ -265,6 +272,7 @@ export class MnemoApiClient {
     this.container = cfg.container
     this.fetchImpl = cfg.fetch ?? fetch
     this.timeoutMs = cfg.timeoutMs ?? 30_000
+    this.modelTimeoutMs = cfg.modelTimeoutMs ?? 0
   }
 
   /**
@@ -354,7 +362,7 @@ export class MnemoApiClient {
       },
       input.container,
       // Respect an operator-configured budget when it is already longer.
-      Math.max(ANSWER_TIMEOUT_MS, this.timeoutMs),
+      Math.max(ANSWER_TIMEOUT_MS, this.timeoutMs, this.modelTimeoutMs),
     )
   }
 
@@ -638,7 +646,8 @@ export class MnemoApiClient {
 
   /** POST /v1/procedures/ask — answered from published procedures only. Needs search:read. */
   async askProcedures(q: string): Promise<ProcedureAskResponse> {
-    return this.request<ProcedureAskResponse>('POST', '/v1/procedures/ask', { q })
+    // The answer comes from the model: a local one on CPU needs minutes.
+    return this.request<ProcedureAskResponse>('POST', '/v1/procedures/ask', { q }, undefined, Math.max(this.timeoutMs, this.modelTimeoutMs))
   }
 
   private async request<T>(

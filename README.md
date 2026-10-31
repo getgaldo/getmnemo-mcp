@@ -53,6 +53,11 @@ only, published procedures only, and the same for every caller.
 | `procedure_get` | One procedure's current steps and conditions, plus its version history. | `memories:read` |
 | `procedure_ask` | "How do we do X here?", answered from published procedures with citations. `abstained: true` means none covers it. | `search:read` |
 
+On a self-hosted install with a local model, `procedure_ask` and the answer
+tool can take minutes. Set `GETMNEMO_MODEL_TIMEOUT_MS` to the API's model
+budget (the self-host bundle does this); they then wait that plus 5 s, at
+most 295 s. Unset, they keep the 30 s and 90 s defaults.
+
 Hosted OAuth sessions get all three. A connection limited to some containers
 reaches them only when its grant includes `procedures:workspace`.
 
