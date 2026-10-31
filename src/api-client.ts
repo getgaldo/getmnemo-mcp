@@ -17,6 +17,7 @@
  * The model can only target containers the connection already permits.
  */
 
+import { MODEL_TIMEOUT_MAX_MS } from './config.js'
 import type {
   CreatePersonInput,
   CreateReminderInput,
@@ -205,7 +206,8 @@ export type ApiClientConfig = {
   /**
    * How long a call that waits on the answer model (procedure ask, /v1/answer)
    * may take, when longer than its usual budget: a self-hosted install on a
-   * local CPU model answers in minutes (modelTimeoutFromEnv).
+   * local CPU model answers in minutes (modelTimeoutFromEnv). Read as at
+   * most MODEL_TIMEOUT_MAX_MS; anything not a positive number is ignored.
    */
   modelTimeoutMs?: number
 }
@@ -272,7 +274,8 @@ export class MnemoApiClient {
     this.container = cfg.container
     this.fetchImpl = cfg.fetch ?? fetch
     this.timeoutMs = cfg.timeoutMs ?? 30_000
-    this.modelTimeoutMs = cfg.modelTimeoutMs ?? 0
+    const model = cfg.modelTimeoutMs
+    this.modelTimeoutMs = model !== undefined && Number.isFinite(model) && model > 0 ? Math.min(model, MODEL_TIMEOUT_MAX_MS) : 0
   }
 
   /**
@@ -362,7 +365,7 @@ export class MnemoApiClient {
       },
       input.container,
       // Respect an operator-configured budget when it is already longer.
-      Math.max(ANSWER_TIMEOUT_MS, this.timeoutMs, this.modelTimeoutMs),
+      Math.max(ANSWER_TIMEOUT_MS, this.modelBudget()),
     )
   }
 
@@ -647,7 +650,12 @@ export class MnemoApiClient {
   /** POST /v1/procedures/ask — answered from published procedures only. Needs search:read. */
   async askProcedures(q: string): Promise<ProcedureAskResponse> {
     // The answer comes from the model: a local one on CPU needs minutes.
-    return this.request<ProcedureAskResponse>('POST', '/v1/procedures/ask', { q }, undefined, Math.max(this.timeoutMs, this.modelTimeoutMs))
+    return this.request<ProcedureAskResponse>('POST', '/v1/procedures/ask', { q }, undefined, this.modelBudget())
+  }
+
+  /** The budget of a call that waits on the answer model: the request budget, or the model's when longer. */
+  private modelBudget(): number {
+    return Math.max(this.timeoutMs, this.modelTimeoutMs)
   }
 
   private async request<T>(
