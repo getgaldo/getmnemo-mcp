@@ -9,6 +9,8 @@
  *   GETMNEMO_CONTAINER_TAG (the tenant boundary, e.g. "user:jane")
  *     — required UNLESS GETMNEMO_SCOPE_TYPE + GETMNEMO_SCOPE_ID are set.
  *   GETMNEMO_SCOPE_TYPE / GETMNEMO_SCOPE_ID (structured-scope alternative)
+ *   GETMNEMO_MODEL_TIMEOUT_MS (optional — how long the API's answer model may take,
+ *     in ms; a self-hosted local model on CPU needs minutes. Unset = hosted budgets)
  *
  * SECURITY: the container is the tenant boundary and is read ONLY from env
  * here — it is never exposed as a model-fillable MCP tool argument.
@@ -16,7 +18,7 @@
 
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { createServer } from './server.js'
-import { resolveContainerFromEnv } from './config.js'
+import { modelTimeoutFromEnv, resolveContainerFromEnv } from './config.js'
 
 async function main(): Promise<void> {
   const apiKey = process.env.GETMNEMO_API_KEY
@@ -47,6 +49,7 @@ async function main(): Promise<void> {
     apiKey,
     workspaceId,
     container,
+    modelTimeoutMs: modelTimeoutFromEnv(process.env),
   })
 
   const transport = new StdioServerTransport()

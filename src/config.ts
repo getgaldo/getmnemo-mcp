@@ -47,3 +47,29 @@ export function resolveContainerFromHeaders(
 
   return resolveContainerFromEnv(env)
 }
+
+/**
+ * The most an answer-model call may be waited on: under Node fetch's 5
+ * minutes (undici drops a response whose headers have not come by then)
+ * and the self-hosted proxy's 300 s read timeout.
+ */
+export const MODEL_TIMEOUT_MAX_MS = 295_000
+
+/** Waited on top of the API's own model budget, so the API's answer (or its 503) arrives before this side gives up. */
+export const MODEL_TIMEOUT_GRACE_MS = 5_000
+
+/**
+ * How long a call that waits on the answer model (procedure_ask, the answer
+ * tool) may take, from GETMNEMO_MODEL_TIMEOUT_MS: the API's own model
+ * budget (a self-hosted install on a local CPU model sets it from
+ * PROCEDURE_ASK_TIMEOUT_MS, 290000), plus a little grace, at most
+ * MODEL_TIMEOUT_MAX_MS. Undefined when unset or unreadable: the hosted
+ * defaults apply.
+ */
+export function modelTimeoutFromEnv(env: EnvLike): number | undefined {
+  const raw = env.GETMNEMO_MODEL_TIMEOUT_MS?.trim()
+  if (!raw || !/^\d+$/.test(raw)) return undefined
+  const value = Number.parseInt(raw, 10)
+  if (!Number.isSafeInteger(value) || value < 1) return undefined
+  return Math.min(value + MODEL_TIMEOUT_GRACE_MS, MODEL_TIMEOUT_MAX_MS)
+}
