@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Security
+- **zod 4.6.7** (zod 3.x carries a high advisory fixed only in 4.6.6+), vitest 4
+  for development. Tool input schemas are unchanged. Two things a client may
+  notice: the reason after `Invalid arguments: <field>:` is zod 4's wording
+  (`Invalid input: expected string, received undefined` where zod 3 said
+  `Required`), and document and procedure ids must be well-formed UUIDs
+  (version and variant bits checked), which every id the API issues is.
+
 ### Fixed
 - **HTTP transport: a failed token check no longer crashes the server.** When
   the API could not be reached, timed out or answered with something other

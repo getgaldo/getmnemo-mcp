@@ -28,6 +28,9 @@ FROM node:22.23.4-alpine3.24@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a4
 ENV NODE_ENV=production
 WORKDIR /app
 RUN apk add --no-cache tini
+# No package manager at runtime: the base image's bundled npm (and its own
+# dependencies) is never run here (CMD is node) and only adds packages to patch.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/lib/node_modules/corepack /opt/yarn-* /usr/local/bin/yarn /usr/local/bin/yarnpkg
 # --chown on COPY, never `chown -R` as a separate layer: a recursive chown of
 # node_modules costs ~2 min on the 2-core arm64 host.
 COPY --from=prod-deps --chown=node:node /app/node_modules ./node_modules

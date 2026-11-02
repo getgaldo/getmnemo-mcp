@@ -31,7 +31,7 @@ const ymdDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD')
 const timezoneField = z.string().min(1).max(64).optional().describe('IANA timezone, e.g. America/New_York. Default UTC.')
 
 const METADATA_MAX_SERIALIZED_BYTES = 16 * 1024
-const boundedMetadata = z.record(z.unknown()).refine(
+const boundedMetadata = z.record(z.string(), z.unknown()).refine(
   (m) => {
     try {
       return Buffer.byteLength(JSON.stringify(m), 'utf8') <= METADATA_MAX_SERIALIZED_BYTES

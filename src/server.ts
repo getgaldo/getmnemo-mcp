@@ -89,7 +89,7 @@ const SearchInput = z.object({
 // we'd rather reject early than waste a round-trip).
 const METADATA_MAX_SERIALIZED_BYTES = 16 * 1024
 const boundedMetadata = z
-  .record(z.unknown())
+  .record(z.string(), z.unknown())
   .refine(
     (m) => {
       try {
