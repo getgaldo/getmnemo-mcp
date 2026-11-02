@@ -1,0 +1,33 @@
+name: Prod smoke (no publish)
+
+# The same prod round-trip and cross-container isolation check that gates
+# publish.yml, on demand and on its own: for after a server or image change,
+# when there is nothing to release. It never publishes (no id-token, no npm
+# registry auth), and uses the same three secrets as publish.yml's smoke job.
+on:
+  workflow_dispatch:
+    inputs:
+      api_url:
+        description: API base URL (default https://api.mnemohq.com)
+        required: false
+        default: ''
+
+permissions: { contents: read }
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - run: npm run build
+      - run: npm run smoke
+        env:
+          MNEMO_API_KEY: ${{ secrets.MNEMO_API_KEY }}
+          MNEMO_WORKSPACE_ID: ${{ secrets.MNEMO_WORKSPACE_ID }}
+          MNEMO_TEST_CONTAINER: ${{ secrets.MNEMO_TEST_CONTAINER }}
+          MNEMO_API_URL: ${{ inputs.api_url }}
