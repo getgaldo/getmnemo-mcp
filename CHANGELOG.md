@@ -25,6 +25,8 @@
   next step, from the page it is on (`url`) and the buttons and fields it last
   used (`recentLabels`). Rules only, no model (`POST /v1/procedures/suggest`).
   It abstains (`no_procedures`, `too_few_matches`, `ambiguous`) rather than guess.
+  The URL's query and fragment are dropped before it is sent. Needs an API with
+  `/v1/procedures/suggest`; an older one answers 404.
 - **`procedure_get` documents `steps[]`**: each current step with where it is
   done when known (action, page shape, target, field; never a value) and the
   branches after it. This needs an API with that field; older APIs return the

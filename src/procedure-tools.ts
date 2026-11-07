@@ -54,10 +54,10 @@ const ProcedureSuggestInput = z.object({
   url: z
     .string()
     .max(2048)
-    .regex(/^https?:\/\/[^\s/]+/i, 'an http(s) URL')
+    .regex(/^https?:\/\/[^\s/]+\S*$/i, 'an http(s) URL')
     .describe('The page you are on.'),
   recentLabels: z
-    .array(z.string().min(1).max(200))
+    .array(z.string().min(1).max(200).regex(/\S/, 'a label must contain non-whitespace text'))
     .max(20)
     .describe('The visible names of the buttons and fields you last used, oldest first. Never what was typed.'),
 })
@@ -95,16 +95,21 @@ export const PROCEDURE_TOOLS: Tool[] = [
   },
   {
     name: 'procedure_suggest',
-    description: `Which published procedure you are in, from the page you are on and the buttons and fields you last used, and its next step (same shape as procedure_get's steps[]). Rules only, no model. abstained=true (with a reason: no_procedures, too_few_matches, ambiguous) means it cannot tell: do not guess. Requires memories:read. ${GRANT_NOTE}`,
+    description: `Which published procedure you are in, from the page you are on and the buttons and fields you last used: at is the step you just did, next the one to do now (null when at was the last), both shaped as procedure_get's steps[]. Rules only, no model. abstained=true (with a reason: no_procedures, too_few_matches, ambiguous) means it cannot tell: do not guess. Requires memories:read. ${GRANT_NOTE}`,
     inputSchema: {
       type: 'object',
       properties: {
-        app: { type: 'string', description: "The app (host name); the URL's own app when left out." },
-        url: { type: 'string', maxLength: 2048, description: 'The page you are on (http or https). Only its host and path shape are used.' },
+        app: { type: 'string', pattern: '^[a-z0-9.-]{1,253}$', description: "The app as a lower-case host name; the URL's own app when left out." },
+        url: {
+          type: 'string',
+          maxLength: 2048,
+          pattern: '^https?://[^\\s/]+\\S*$',
+          description: 'The page you are on (http or https). Its query and fragment are dropped before sending; only its host and path shape are used.',
+        },
         recentLabels: {
           type: 'array',
           maxItems: 20,
-          items: { type: 'string', minLength: 1, maxLength: 200 },
+          items: { type: 'string', minLength: 1, maxLength: 200, pattern: '\\S' },
           description: 'The visible names of the buttons and fields you last used, oldest first. Never what was typed.',
         },
       },
@@ -125,8 +130,11 @@ export async function dispatchProcedureTool(
       return api.getProcedure(ProcedureGetInput.parse(raw).id)
     case 'procedure_ask':
       return api.askProcedures(ProcedureAskInput.parse(raw).q)
-    case 'procedure_suggest':
-      return api.suggestProcedure(ProcedureSuggestInput.parse(raw))
+    case 'procedure_suggest': {
+      const input = ProcedureSuggestInput.parse(raw)
+      // Never send a query or fragment (tokens, ids): the API reads only the host and path.
+      return api.suggestProcedure({ ...input, url: input.url.split(/[?#]/, 1)[0] ?? input.url })
+    }
   }
 }
 
