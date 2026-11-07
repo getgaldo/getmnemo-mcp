@@ -186,6 +186,18 @@ export type ProcedureAskResponse = {
   citations: Array<{ title: string | null; url: string | null; app: string | null; content: string; score: number }>
 }
 
+/** POST /v1/procedures/suggest: a procedure and its next step, or why it cannot tell. Steps as procedure_get's steps[]. */
+export type ProcedureSuggestResponse =
+  | { abstained: true; reason: 'no_procedures' | 'too_few_matches' | 'ambiguous' }
+  | {
+      abstained: false
+      procedureId: string
+      title: string
+      matched: number
+      at: Record<string, unknown>
+      next: Record<string, unknown> | null
+    }
+
 export type ApiClientConfig = {
   baseUrl: string
   apiKey: string
@@ -645,6 +657,11 @@ export class MnemoApiClient {
   /** GET /v1/procedures/:id — one published procedure with its versions. Needs memories:read. */
   async getProcedure(id: string): Promise<Record<string, unknown>> {
     return this.request<Record<string, unknown>>('GET', `/v1/procedures/${encodeURIComponent(id)}`)
+  }
+
+  /** POST /v1/procedures/suggest — which procedure the caller is in and its next step; rules only. Needs memories:read. */
+  async suggestProcedure(input: { app?: string; url: string; recentLabels: string[] }): Promise<ProcedureSuggestResponse> {
+    return this.request<ProcedureSuggestResponse>('POST', '/v1/procedures/suggest', input)
   }
 
   /** POST /v1/procedures/ask — answered from published procedures only. Needs search:read. */

@@ -21,6 +21,14 @@
   running.
 
 ### Added
+- **`procedure_suggest`**: which published procedure the caller is in, and its
+  next step, from the page it is on (`url`) and the buttons and fields it last
+  used (`recentLabels`). Rules only, no model (`POST /v1/procedures/suggest`).
+  It abstains (`no_procedures`, `too_few_matches`, `ambiguous`) rather than guess.
+- **`procedure_get` documents `steps[]`**: each current step with where it is
+  done when known (action, page shape, target, field; never a value) and the
+  branches after it. This needs an API with that field; older APIs return the
+  procedure without it.
 - **`procedure_list`, `procedure_get` and `procedure_ask`**: the workspace's
   published procedures (`/v1/procedures`), for API-key and hosted OAuth
   sessions. Read only. A container-limited grant needs
