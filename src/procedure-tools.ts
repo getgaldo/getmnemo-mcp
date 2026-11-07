@@ -54,7 +54,7 @@ const ProcedureSuggestInput = z.object({
   url: z
     .string()
     .max(2048)
-    .regex(/^https?:\/\/[^\s/]+\S*$/i, 'an http(s) URL')
+    .regex(/^https?:\/\/[^\s/?#@]+(?:[/?#]\S*)?$/i, 'an http(s) URL with no user or password')
     .describe('The page you are on.'),
   recentLabels: z
     .array(z.string().min(1).max(200).regex(/\S/, 'a label must contain non-whitespace text'))
@@ -103,7 +103,7 @@ export const PROCEDURE_TOOLS: Tool[] = [
         url: {
           type: 'string',
           maxLength: 2048,
-          pattern: '^https?://[^\\s/]+\\S*$',
+          pattern: '^[Hh][Tt][Tt][Pp][Ss]?://[^\\s/?#@]+(?:[/?#]\\S*)?$',
           description: 'The page you are on (http or https). Its query and fragment are dropped before sending; only its host and path shape are used.',
         },
         recentLabels: {
@@ -132,8 +132,9 @@ export async function dispatchProcedureTool(
       return api.askProcedures(ProcedureAskInput.parse(raw).q)
     case 'procedure_suggest': {
       const input = ProcedureSuggestInput.parse(raw)
-      // Never send a query or fragment (tokens, ids): the API reads only the host and path.
-      return api.suggestProcedure({ ...input, url: input.url.split(/[?#]/, 1)[0] ?? input.url })
+      // Only the origin and path go (the API reads no more): never a query, fragment, user or password.
+      const page = new URL(input.url)
+      return api.suggestProcedure({ ...input, url: `${page.origin}${page.pathname}` })
     }
   }
 }

@@ -146,6 +146,8 @@ describe('procedure tools', () => {
       { url: 'https://acme.zendesk.com/', recentLabels: [''] },
       { url: 'https://acme.zendesk.com/', recentLabels: ['   '] },
       { url: 'https://acme.zendesk.com/ x', recentLabels: [] },
+      { url: 'https://user:secret@acme.zendesk.com/', recentLabels: [] },
+      { url: 'https://?token=abc', recentLabels: [] },
       { app: 'Acme.Zendesk.com', url: 'https://acme.zendesk.com/', recentLabels: [] },
       { url: 'https://acme.zendesk.com/' },
     ]) {
