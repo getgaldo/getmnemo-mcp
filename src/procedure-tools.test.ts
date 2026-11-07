@@ -71,7 +71,7 @@ describe('procedure tools', () => {
       h = await harness(vi.fn<typeof fetch>(), { principal })
       const { tools } = await h.client.listTools()
       const names = tools.map((t) => t.name)
-      for (const tool of ['procedure_list', 'procedure_get', 'procedure_ask']) expect(names, `${principal} ${tool}`).toContain(tool)
+      for (const tool of ['procedure_list', 'procedure_get', 'procedure_ask', 'procedure_suggest']) expect(names, `${principal} ${tool}`).toContain(tool)
       await h.close()
       h = undefined
     }
@@ -109,6 +109,65 @@ describe('procedure tools', () => {
     const bad = await h.call('procedure_get', { id: '../memories' })
     expect(bad.isError).toBe(true)
     expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it('procedure_suggest posts where the caller is and what it last used, and returns the suggestion as the API gives it', async () => {
+    const suggestion = {
+      abstained: false,
+      procedureId: PROCEDURE,
+      title: 'Solve a ticket',
+      matched: 2,
+      at: { position: 2, text: 'Click Submit as Solved', action: 'click', page: '/agent/tickets/:id', target: { role: 'button', label: 'Submit as Solved' }, field: null, branches: [] },
+      next: null,
+    }
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(response(suggestion))
+    h = await harness(fetchImpl, { principal: 'oauth' })
+    const args = { app: 'zendesk.com', url: 'https://acme.zendesk.com/agent/tickets/4521?token=abc#access_token=xyz', recentLabels: ['Status', 'Submit as Solved'] }
+    const { text, isError } = await h.call('procedure_suggest', args)
+    expect(isError).toBe(false)
+    expect(JSON.parse(text)).toEqual(suggestion)
+    const [url, init] = fetchImpl.mock.calls[0]!
+    expect(url).toBe('https://api.example.com/v1/procedures/suggest')
+    expect(init?.method).toBe('POST')
+    // The query and fragment never leave the MCP server.
+    expect(JSON.parse(String(init?.body))).toEqual({ ...args, url: 'https://acme.zendesk.com/agent/tickets/4521' })
+    expect(String(init?.body)).not.toContain('token')
+    expect(new Headers(init?.headers).has('x-mnemo-container')).toBe(false)
+  })
+
+  it('procedure_suggest passes an abstention through, and refuses a bad URL or too many labels before calling the API', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(response({ abstained: true, reason: 'ambiguous' }))
+    h = await harness(fetchImpl)
+    const ok = await h.call('procedure_suggest', { url: 'https://acme.zendesk.com/', recentLabels: [] })
+    expect(JSON.parse(ok.text)).toEqual({ abstained: true, reason: 'ambiguous' })
+    for (const bad of [
+      { url: 'javascript:alert(1)', recentLabels: [] },
+      { url: 'https://acme.zendesk.com/', recentLabels: Array.from({ length: 21 }, (_, i) => `L${i}`) },
+      { url: 'https://acme.zendesk.com/', recentLabels: [''] },
+      { url: 'https://acme.zendesk.com/', recentLabels: ['   '] },
+      { url: 'https://acme.zendesk.com/ x', recentLabels: [] },
+      { url: 'https://user:secret@acme.zendesk.com/', recentLabels: [] },
+      { url: 'https://?token=abc', recentLabels: [] },
+      { app: 'Acme.Zendesk.com', url: 'https://acme.zendesk.com/', recentLabels: [] },
+      { url: 'https://acme.zendesk.com/' },
+    ]) {
+      const refused = await h.call('procedure_suggest', bad)
+      expect(refused.isError, JSON.stringify(bad)).toBe(true)
+      expect(refused.text).toContain('Invalid arguments')
+    }
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it("procedure_suggest passes the API's refusal on, never as a missing procedure (an older API without the route answers 404)", async () => {
+    h = await harness(vi.fn<typeof fetch>().mockResolvedValue(apiError(404, undefined, 'Cannot POST /v1/procedures/suggest')))
+    const missing = await h.call('procedure_suggest', { url: 'https://acme.zendesk.com/', recentLabels: ['Save'] })
+    expect(missing.isError).toBe(true)
+    expect(missing.text).toBe('Mnemo API error (404): Cannot POST /v1/procedures/suggest')
+    await h.close()
+    h = await harness(vi.fn<typeof fetch>().mockResolvedValue(apiError(403, 'PROCEDURES_OUTSIDE_GRANT', 'This connection does not cover the procedures container (procedures:workspace).')), { principal: 'oauth' })
+    const outside = await h.call('procedure_suggest', { url: 'https://acme.zendesk.com/', recentLabels: ['Save'] })
+    expect(outside.isError).toBe(true)
+    expect(outside.text).toContain('procedures:workspace')
   })
 
   it('procedure_get says plainly when no published procedure has the id', async () => {

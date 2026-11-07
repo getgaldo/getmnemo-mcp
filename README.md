@@ -50,8 +50,9 @@ only, published procedures only, and the same for every caller.
 | Tool | What it does | Scope |
 |---|---|---|
 | `procedure_list` | The workspace's published procedures, most recently seen first, optionally for one app. | `memories:read` |
-| `procedure_get` | One procedure's current steps and conditions, plus its version history. | `memories:read` |
+| `procedure_get` | One procedure's version history, and `steps[]`: each current step with where it is done when known (action, page shape, the control's role and name, or the field a change sets; never a value) and the conditions after it. | `memories:read` |
 | `procedure_ask` | "How do we do X here?", answered from published procedures with citations. `abstained: true` means none covers it. | `search:read` |
+| `procedure_suggest` | "Which procedure am I in, and what's next?", from the page you are on and the buttons and fields you last used. Rules only, no model. `abstained: true` (with a reason) means it cannot tell. | `memories:read` |
 
 On a self-hosted install with a local model, `procedure_ask` and
 `memory_answer` can take minutes. Set `GETMNEMO_MODEL_TIMEOUT_MS` to how long
@@ -61,7 +62,7 @@ and `memory_answer` at least that plus 5 s, at most 295 s. Unset, they keep
 the 30 s and 90 s defaults. Your MCP client has its own per-call timeout
 (often 60 s): raise it too, or it gives up first.
 
-Hosted OAuth sessions get all three. A connection limited to some containers
+Hosted OAuth sessions get all four. A connection limited to some containers
 reaches them only when its grant includes `procedures:workspace`.
 
 Remote HTTP calls are scoped by the user's Mnemo OAuth grant. The user signs
